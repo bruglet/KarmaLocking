@@ -6,6 +6,7 @@ using BepInEx.Logging;
 using RoR2;
 using RoR2.RemoteGameBrowser;
 using RoR2.UI;
+using UnityEngine.EventSystems;
 using UnityEngine.Networking;
 
 namespace KarmaLocking
@@ -56,9 +57,11 @@ namespace KarmaLocking
 
             // Gameplay (host)
             On.RoR2.KarmaManager.ModifyKarma += KarmaManager_ModifyKarma;
+            On.RoR2.KarmaManager.SetKarmaServer += KarmaManager_SetKarmaServer;
 
             // Lobby input
             On.RoR2.UI.RuleChoiceController.OnClick += RuleChoiceController_OnClick;
+            On.RoR2.UI.MPButton.OnPointerClick += MPButton_OnPointerClick;
             On.RoR2.UI.RuleCategoryController.SetRandomVotes += RuleCategoryController_SetRandomVotes;
 
             // Icons
@@ -75,7 +78,9 @@ namespace KarmaLocking
             Run.onRunStartGlobal -= KarmaLock.OnRunStartServer;
             Run.onRunDestroyGlobal -= Run_onRunDestroyGlobal;
             On.RoR2.KarmaManager.ModifyKarma -= KarmaManager_ModifyKarma;
+            On.RoR2.KarmaManager.SetKarmaServer -= KarmaManager_SetKarmaServer;
             On.RoR2.UI.RuleChoiceController.OnClick -= RuleChoiceController_OnClick;
+            On.RoR2.UI.MPButton.OnPointerClick -= MPButton_OnPointerClick;
             On.RoR2.UI.RuleCategoryController.SetRandomVotes -= RuleCategoryController_SetRandomVotes;
             On.RoR2.UI.RuleChoiceController.SetChoice -= RuleChoiceController_SetChoice;
             On.RoR2.UI.RuleCategoryController.SetupGridVoteDisplay -= RuleCategoryController_SetupGridVoteDisplay;
@@ -91,6 +96,16 @@ namespace KarmaLocking
         }
 
         #region Gameplay
+
+        // Clamp the final value, after multipliers, including initialization and restored saves.
+        private static void KarmaManager_SetKarmaServer(On.RoR2.KarmaManager.orig_SetKarmaServer orig, KarmaManager self, int value)
+        {
+            if (NetworkServer.active && Run.instance && KarmaLock.RunCap >= 0)
+            {
+                value = Math.Min(value, KarmaLock.RunCap);
+            }
+            orig(self, value);
+        }
 
         // Every Karma increase (triggers, multipliers) goes through ModifyKarma on the host. The starting
         // level is set with SetKarmaServer directly, so blocking here keeps Karma where the run started.
@@ -130,6 +145,11 @@ namespace KarmaLocking
             }
 
             int level = KarmaLock.LevelOf(choice);
+            if (KarmaLock.LobbyCap >= 0 && level > KarmaLock.LobbyCap)
+            {
+                Log.LogInfo("The starting Karma cannot exceed the cap. Remove or raise the cap first.");
+                return;
+            }
             if (!self.cycleThroughOptions && level >= 0 && voteController.IsChoiceVoted(choice))
             {
                 KarmaLock.RequestLobbyLevel(networkUser, KarmaLock.LobbyLevel == level ? KarmaLock.Unlocked : level);
@@ -141,6 +161,22 @@ namespace KarmaLocking
             {
                 KarmaLock.RequestLobbyLevel(networkUser, KarmaLock.Unlocked);
             }
+        }
+
+        private static void MPButton_OnPointerClick(On.RoR2.UI.MPButton.orig_OnPointerClick orig, MPButton self, PointerEventData eventData)
+        {
+            if (eventData.button == PointerEventData.InputButton.Right && !self.disablePointerClick
+                && self.IsInteractable() && self.InputModuleIsAllowed(eventData.currentInputModule))
+            {
+                var controller = self.GetComponentInParent<RuleChoiceController>();
+                var badge = controller ? controller.GetComponent<RuleChoiceLockBadge>() : null;
+                if (badge && controller.hgButton == self && badge.ShowClickHint)
+                {
+                    badge.ToggleCap(self.eventSystem?.localUser?.currentNetworkUser);
+                    return;
+                }
+            }
+            orig(self, eventData);
         }
 
         // The "random" button can change the Karma vote; a lock set for the old level shouldn't carry over.
@@ -196,6 +232,7 @@ namespace KarmaLocking
             {
                 badge.Source = setChoiceSource;
                 badge.ShowClickHint = setChoiceIsVoteButton;
+                badge.SuppressCap = setChoiceSource == NeverLocked;
             }
         }
 
@@ -233,7 +270,7 @@ namespace KarmaLocking
             orig(self, newDisplayData);
             if (self.karmaEarnedIcon)
             {
-                KarmaIconLockBadge.For(self.karmaEarnedIcon).SetLockedOverride(KarmaLock.IsRunLocked);
+                KarmaIconLockBadge.For(self.karmaEarnedIcon).SetLockedOverride(KarmaLock.IsRunLocked, KarmaLock.RunCap);
             }
         }
 

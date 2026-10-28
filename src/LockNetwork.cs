@@ -18,7 +18,7 @@ namespace KarmaLocking
     {
         // Vanilla uses 48-88; other mods use e.g. 20024 (WolfoLibrary). "KL" = 0x4B4C.
         internal const short StateMessageType = 0x4B4C;
-        private const byte ProtocolVersion = 1;
+        private const byte ProtocolVersion = 2;
 
         private static readonly HashSet<NetworkConnection> moddedConnections = new HashSet<NetworkConnection>();
 
@@ -41,9 +41,9 @@ namespace KarmaLocking
             }
         }
 
-        internal static void SendRequest(NetworkUser sender, int level)
+        internal static void SendRequest(NetworkUser sender, int level, bool capped)
         {
-            RoR2.Console.instance.SubmitCmd(sender, "karmalock_set " + level.ToString(CultureInfo.InvariantCulture));
+            RoR2.Console.instance.SubmitCmd(sender, "karmalock_set " + level.ToString(CultureInfo.InvariantCulture) + (capped ? " cap" : ""));
         }
 
         #region Host
@@ -63,12 +63,14 @@ namespace KarmaLocking
 
         private static void SendState(NetworkConnection conn)
         {
-            KarmaLock.GetHostState(out int lobbyLevel, out int runLevel);
+            KarmaLock.GetHostState(out int lobbyLevel, out int runLevel, out int lobbyCap, out int runCap);
             var writer = new NetworkWriter();
             writer.StartMessage(StateMessageType);
             writer.Write(ProtocolVersion);
             writer.Write((sbyte)lobbyLevel);
             writer.Write((sbyte)runLevel);
+            writer.Write((sbyte)lobbyCap);
+            writer.Write((sbyte)runCap);
             writer.FinishMessage();
             conn.SendWriter(writer, QosChannelIndex.defaultReliable.intVal);
         }
@@ -100,7 +102,7 @@ namespace KarmaLocking
         }
 
         [ConCommand(commandName = "karmalock_set", flags = ConVarFlags.ExecuteOnServer,
-            helpText = "Lobby only. Locks Karma at the given level (0-8), or unlocks it with -1. Usage: karmalock_set <level>")]
+            helpText = "Lobby only. Locks Karma at a level (0-8), or clears it with -1. Add 'cap' to set or clear a cap instead. Usage: karmalock_set <level> [cap]")]
         private static void CCSet(ConCommandArgs args)
         {
             if (!NetworkServer.active)
@@ -122,7 +124,7 @@ namespace KarmaLocking
                 }
                 return;
             }
-            KarmaLock.SetLobbyLevelServer(level);
+            KarmaLock.SetLobbyLevelServer(level, args.Count > 1 && args.GetArgString(1) == "cap");
         }
 
         #endregion
@@ -144,7 +146,9 @@ namespace KarmaLocking
             }
             int lobbyLevel = netMsg.reader.ReadSByte();
             int runLevel = netMsg.reader.ReadSByte();
-            KarmaLock.ReceiveState(lobbyLevel, runLevel);
+            int lobbyCap = netMsg.reader.ReadSByte();
+            int runCap = netMsg.reader.ReadSByte();
+            KarmaLock.ReceiveState(lobbyLevel, runLevel, lobbyCap, runCap);
         }
 
         #endregion
@@ -155,7 +159,7 @@ namespace KarmaLocking
             string role = NetworkServer.active ? "host" : NetworkClient.active ? "client" : "offline";
             int karma = KarmaManager.instance ? KarmaManager.instance.GetEffectiveKarma() : -1;
             UnityEngine.Debug.Log($"[KarmaLocking] role={role} canLock={KarmaLock.CanLock} hostHasMod={KarmaLock.HostHasMod} "
-                + $"lobbyLevel={KarmaLock.LobbyLevel} runLevel={KarmaLock.RunLevel} currentKarma={karma} moddedClients={moddedConnections.Count}");
+                + $"lobbyLevel={KarmaLock.LobbyLevel} runLevel={KarmaLock.RunLevel} lobbyCap={KarmaLock.LobbyCap} runCap={KarmaLock.RunCap} currentKarma={karma} moddedClients={moddedConnections.Count}");
         }
     }
 }

@@ -37,6 +37,7 @@
     <Reference Include="MonoMod.Utils" HintPath="$(BepInExCoreDir)/MonoMod.Utils.dll" Private="false" />
     <Reference Include="MMHOOK_RoR2" HintPath="$(MMHookDir)/MMHOOK_RoR2.dll" Private="false" />
     <Reference Include="RoR2" HintPath="$(ManagedDir)/RoR2.dll" Private="false" />
+    <Reference Include="Rewired_Core" HintPath="$(ManagedDir)/Rewired_Core.dll" Private="false" />
     <Reference Include="HGUnityUtils" HintPath="$(ManagedDir)/HGUnityUtils.dll" Private="false" />
     <Reference Include="HGCSharpUtils" HintPath="$(ManagedDir)/HGCSharpUtils.dll" Private="false" />
     <Reference Include="UnityEngine" HintPath="$(ManagedDir)/UnityEngine.dll" Private="false" />

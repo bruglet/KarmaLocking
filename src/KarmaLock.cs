@@ -18,10 +18,14 @@ namespace KarmaLocking
         // Host: the level locked in the lobby, and the level locked for the current run.
         private static int hostLobbyLevel = Unlocked;
         private static int hostRunLevel = Unlocked;
+        private static int hostLobbyCap = Unlocked;
+        private static int hostRunCap = Unlocked;
 
         // Client: the same two values as last sent by the host.
         private static int receivedLobbyLevel = Unlocked;
         private static int receivedRunLevel = Unlocked;
+        private static int receivedLobbyCap = Unlocked;
+        private static int receivedRunCap = Unlocked;
 
         // Client: whether the host has this mod (it answered our hello).
         internal static bool HostHasMod { get; private set; }
@@ -34,6 +38,10 @@ namespace KarmaLocking
         internal static int LobbyLevel => NetworkServer.active ? hostLobbyLevel : HostHasMod ? receivedLobbyLevel : Unlocked;
 
         internal static int RunLevel => NetworkServer.active ? hostRunLevel : HostHasMod ? receivedRunLevel : Unlocked;
+
+        internal static int LobbyCap => NetworkServer.active ? hostLobbyCap : HostHasMod ? receivedLobbyCap : Unlocked;
+
+        internal static int RunCap => NetworkServer.active ? hostRunCap : HostHasMod ? receivedRunCap : Unlocked;
 
         internal static bool IsRunLocked => RunLevel >= 0 && Run.instance;
 
@@ -68,7 +76,7 @@ namespace KarmaLocking
         #region Host
 
         // Applies a lock request from the host's own UI or from a client. Returns false if not allowed now.
-        internal static bool SetLobbyLevelServer(int level)
+        internal static bool SetLobbyLevelServer(int level, bool capped = false)
         {
             if (!NetworkServer.active)
             {
@@ -83,10 +91,29 @@ namespace KarmaLocking
             {
                 level = Unlocked;
             }
-            if (hostLobbyLevel != level)
+            if (capped && level >= 0 && PreGameController.instance.readOnlyRuleBook.startingKarma > level)
             {
-                hostLobbyLevel = level;
-                KarmaLockingPlugin.Log.LogInfo(level >= 0 ? $"Karma locked at level {level}." : "Karma unlocked.");
+                KarmaLockingPlugin.Log.LogInfo("The Karma cap cannot be below the starting level.");
+                return false;
+            }
+            int lobbyLevel = capped ? hostLobbyLevel : level;
+            int lobbyCap = capped ? level : hostLobbyCap;
+            if (level >= 0)
+            {
+                if (capped)
+                {
+                    lobbyLevel = Unlocked;
+                }
+                else
+                {
+                    lobbyCap = Unlocked;
+                }
+            }
+            if (hostLobbyLevel != lobbyLevel || hostLobbyCap != lobbyCap)
+            {
+                hostLobbyLevel = lobbyLevel;
+                hostLobbyCap = lobbyCap;
+                KarmaLockingPlugin.Log.LogInfo($"Karma lock: {lobbyLevel}; cap: {lobbyCap}.");
                 LockNetwork.BroadcastState();
             }
             return true;
@@ -101,6 +128,11 @@ namespace KarmaLocking
             }
             int starting = run.ruleBook.startingKarma;
             hostRunLevel = hostLobbyLevel >= 0 && starting == hostLobbyLevel ? hostLobbyLevel : Unlocked;
+            hostRunCap = starting >= 0 ? hostLobbyCap : Unlocked;
+            if (hostRunCap >= 0)
+            {
+                KarmaLockingPlugin.Log.LogInfo($"Run Karma capped at {hostRunCap}.");
+            }
             KarmaLockingPlugin.Log.LogInfo(hostRunLevel >= 0
                 ? $"Run started with Karma locked at {hostRunLevel}."
                 : $"Run started with Karma unlocked (starting level {starting}, lobby lock {hostLobbyLevel}).");
@@ -109,24 +141,27 @@ namespace KarmaLocking
 
         internal static void OnRunDestroyServer()
         {
-            if (NetworkServer.active && hostRunLevel != Unlocked)
+            if (NetworkServer.active && (hostRunLevel != Unlocked || hostRunCap != Unlocked))
             {
                 hostRunLevel = Unlocked;
+                hostRunCap = Unlocked;
                 LockNetwork.BroadcastState();
             }
         }
 
-        internal static void GetHostState(out int lobbyLevel, out int runLevel)
+        internal static void GetHostState(out int lobbyLevel, out int runLevel, out int lobbyCap, out int runCap)
         {
             lobbyLevel = hostLobbyLevel;
             runLevel = hostRunLevel;
+            lobbyCap = hostLobbyCap;
+            runCap = hostRunCap;
         }
 
         #endregion
 
         #region Client
 
-        internal static void ReceiveState(int lobbyLevel, int runLevel)
+        internal static void ReceiveState(int lobbyLevel, int runLevel, int lobbyCap, int runCap)
         {
             if (!HostHasMod)
             {
@@ -135,6 +170,8 @@ namespace KarmaLocking
             HostHasMod = true;
             receivedLobbyLevel = lobbyLevel;
             receivedRunLevel = runLevel;
+            receivedLobbyCap = lobbyCap;
+            receivedRunCap = runCap;
         }
 
         internal static void ResetClientState()
@@ -142,20 +179,22 @@ namespace KarmaLocking
             HostHasMod = false;
             receivedLobbyLevel = Unlocked;
             receivedRunLevel = Unlocked;
+            receivedLobbyCap = Unlocked;
+            receivedRunCap = Unlocked;
         }
 
         #endregion
 
         // Lock or unlock from this game's UI: directly on the host, as a request from a client.
-        internal static void RequestLobbyLevel(NetworkUser sender, int level)
+        internal static void RequestLobbyLevel(NetworkUser sender, int level, bool capped = false)
         {
             if (NetworkServer.active)
             {
-                SetLobbyLevelServer(level);
+                SetLobbyLevelServer(level, capped);
             }
             else if (HostHasMod && sender)
             {
-                LockNetwork.SendRequest(sender, level);
+                LockNetwork.SendRequest(sender, level, capped);
             }
         }
 
